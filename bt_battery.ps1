@@ -1,4 +1,4 @@
-﻿# Generated using Google Gemini 3.5 flash with some minor corrections
+# Generated using Google Gemini 3.5 flash with some minor corrections
 # ==============================================================================
 # Dynamic Bluetooth Headset Battery Monitor Tray Icon for Windows 11
 # ==============================================================================
