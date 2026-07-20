@@ -74,7 +74,7 @@ function Refresh-BatteryStatus {
     # Update the Tray Icon
     if ($null -ne $foundBatteryData) {
         $percentage = [int]$foundBatteryData
-        $NotifyIcon.Text = "${matchedDeviceName}: $percentage%"
+        $NotifyIcon.Text = "${matchedDeviceName}: $percentage% -$(Get-Date -Format "HH:mm:ss")"
         
         # Color coding
         $color = [System.Drawing.Color]::White
