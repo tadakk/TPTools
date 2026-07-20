@@ -15,6 +15,8 @@ Add-Type -AssemblyName System.Drawing
 $Context = New-Object System.Windows.Forms.ApplicationContext
 $NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $NotifyIcon.Visible = $true
+$theme = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+If ($theme.SystemUsesLightTheme -eq 1) {$defaultColor="BLACK"} else {$defaultColor="WHITE"}
 
 # 4. Helper function to dynamically draw a percentage text icon
 function Update-TrayIcon ([string]$text, [System.Drawing.Color]$textColor) {
@@ -46,7 +48,7 @@ function Update-TrayIcon ([string]$text, [System.Drawing.Color]$textColor) {
 # 5. Core logic to dynamically fetch the active Bluetooth battery status
 function Refresh-BatteryStatus {
     # Speed optimization: Retrieve only active ('OK') devices, then narrow down to the Hands-Free Audio service
-    $activeAudioDevices = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | Where-Object { $_.Service -eq "BthHFEnum" }
+    $activeAudioDevices = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | Where-Object { $_.Service -eq "BthHFEnum" -or $_.Service -eq "BthLEEnum" }
     
     if ($null -eq $activeAudioDevices -or $activeAudioDevices.Count -eq 0) {
         $NotifyIcon.Text = "No Bluetooth Audio Connected"
@@ -77,7 +79,7 @@ function Refresh-BatteryStatus {
         $NotifyIcon.Text = "${matchedDeviceName}: $percentage% -$(Get-Date -Format "HH:mm:ss")"
         
         # Color coding
-        $color = [System.Drawing.Color]::White
+        $color = [System.Drawing.Color]::$defaultColor
         if ($percentage -lt 20) { $color = [System.Drawing.Color]::OrangeRed }
         elseif ($percentage -lt 50) { $color = [System.Drawing.Color]::Orange }
         If ($percentage -lt 10 -and $LastNotification -lt (Get-Date).AddHours(-1)) {
