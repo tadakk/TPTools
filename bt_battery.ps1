@@ -1,4 +1,4 @@
-# Generated using Google Gemini 3.5 flash with some minor corrections
+﻿# Generated using Google Gemini 3.5 flash with some minor corrections
 # ==============================================================================
 # Dynamic Bluetooth Headset Battery Monitor Tray Icon for Windows 11
 # ==============================================================================
@@ -10,6 +10,8 @@ $LastNotification=(Get-Date).AddHours(-1)
 # 2. Load necessary assemblies for UI and Drawing
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+# Import DestroyIcon from user32.dll to clear GDI icon handles from memory
+Add-Type -MemberDefinition '[DllImport("user32.dll", SetLastError = true)] public static extern bool DestroyIcon(IntPtr hIcon);' -Name "Win32Utils" -Namespace "Win32"
 
 # 3. Initialize the application context and NotifyIcon
 $Context = New-Object System.Windows.Forms.ApplicationContext
@@ -36,9 +38,19 @@ function Update-TrayIcon ([string]$text, [System.Drawing.Color]$textColor) {
     
     $hIcon = $bitmap.GetHicon()
     $oldIcon = $NotifyIcon.Icon
+    
+    # Create the new icon from the handle
     $NotifyIcon.Icon = [System.Drawing.Icon]::FromHandle($hIcon)
     
-    if ($oldIcon) { $oldIcon.Dispose() }
+    # Force the Shell Notification Area to refresh its drawing cache
+    $NotifyIcon.Visible = $true
+    
+    # Clean up managed and unmanaged GDI resources
+    if ($oldIcon) { 
+        $oldIcon.Dispose() 
+    }
+    [Win32.Win32Utils]::DestroyIcon($hIcon) | Out-Null
+    
     $brush.Dispose()
     $font.Dispose()
     $graphics.Dispose()
@@ -47,50 +59,74 @@ function Update-TrayIcon ([string]$text, [System.Drawing.Color]$textColor) {
 
 # 5. Core logic to dynamically fetch the active Bluetooth battery status
 function Refresh-BatteryStatus {
-    # Speed optimization: Retrieve only active ('OK') devices, then narrow down to the Hands-Free Audio service
-    $activeAudioDevices = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | Where-Object { $_.Service -eq "BthHFEnum" -or $_.Service -eq "BthLEEnum" }
-    
-    if ($null -eq $activeAudioDevices -or $activeAudioDevices.Count -eq 0) {
+    Write-Host ""
+    $containerKey = "DEVPKEY_Device_ContainerId"
+
+    # 1. Gather Container IDs of all CURRENTLY CONNECTED Audio Endpoints
+    # When a headset powers off, Windows removes these endpoints from -PresentOnly instantly.
+    $liveAudioEndpoints = Get-PnpDevice -Class "AudioEndpoint" -PresentOnly -ErrorAction SilentlyContinue | 
+                          Where-Object { $_.Status -eq "OK" }
+                          
+    $liveContainerIds = @()
+    foreach ($ep in $liveAudioEndpoints) {
+        $cId = (Get-PnpDeviceProperty -InstanceId $ep.InstanceId -KeyName $containerKey -ErrorAction SilentlyContinue).Data
+        if ($cId) { 
+            Write-Host "Found audio device $($ep.Friendlyname)"
+            $liveContainerIds += [string]$cId
+        }
+    }
+
+    # 2. Get active Bluetooth Hands-Free drivers and verify it's an audio gateway
+    $activeBluetoothDrivers = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | 
+                              Where-Object { ($_.Service -eq "BthHFEnum" -or $_.Service -eq "BthLEEnum") -and $_.Description -eq "Microsoft Bluetooth Hands-Free Profile AudioGateway role" }
+
+    if ($null -eq $activeBluetoothDrivers -or $activeBluetoothDrivers.Count -eq 0 -or $liveContainerIds.Count -eq 0) {
         $NotifyIcon.Text = "No Bluetooth Audio Connected"
         Update-TrayIcon "X" ([System.Drawing.Color]::Red)
         return
     }
 
     $batteryKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2"
+    $isAudioDeviceKey = "DEVPKEY_Device_DeviceDesc"
     $foundBatteryData = $null
     $matchedDeviceName = ""
 
-    # Check the active audio hands-free device(s) directly
-    foreach ($dev in $activeAudioDevices) {
+    foreach ($btDev in $activeBluetoothDrivers) {
         try {
-            $checkData = (Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName $batteryKey -ErrorAction SilentlyContinue).Data
+            Write-Host "Found bluetooth device $($btDev.FriendlyName)"
+            # Check if this Bluetooth driver's Container ID exists in the LIVE audio endpoint list
+            $devContainerId = [string](Get-PnpDeviceProperty -InstanceId $btDev.InstanceId -KeyName $containerKey -ErrorAction SilentlyContinue).Data
+            if ($liveContainerIds -notcontains $devContainerId) {
+                continue # Stale node from a powered-off headset—skip it!
+            }
+            $checkData = (Get-PnpDeviceProperty -InstanceId $btDev.InstanceId -KeyName $batteryKey -ErrorAction SilentlyContinue).Data
             if ($null -ne $checkData -and $checkData -gt 0 -and $checkData -le 100) {
+                Write-Host "Found current device $($btDev.FriendlyName) with Battery Level $checkData%" -ForegroundColor Cyan
                 $foundBatteryData = $checkData
-                # Clean up "Hands-Free AG" trailing text from name if present for a cleaner tray label
-                $matchedDeviceName = $dev.FriendlyName -replace "\s+Hands-Free\s+AG$", ""
+                $matchedDeviceName = $btDev.FriendlyName -replace "\s+Hands-Free\s+AG$", ""
                 break
             }
         } catch {}
     }
-    
+
     # Update the Tray Icon
     if ($null -ne $foundBatteryData) {
         $percentage = [int]$foundBatteryData
-        $NotifyIcon.Text = "${matchedDeviceName}: $percentage% -$(Get-Date -Format "HH:mm:ss")"
+        $NotifyIcon.Text = "${matchedDeviceName}: $percentage% - $(Get-Date -Format "HH:mm:ss")"
         
         # Color coding
         $color = [System.Drawing.Color]::$defaultColor
-        if ($percentage -lt 20) { $color = [System.Drawing.Color]::OrangeRed }
-        elseif ($percentage -lt 50) { $color = [System.Drawing.Color]::Orange }
-        If ($percentage -lt 10 -and $LastNotification -lt (Get-Date).AddHours(-1)) {
-            $LastNotification=Get-Date
-            [System.Windows.Forms.MessageBox]::Show("Please charge your headset", "Headset under 10%")
+        if ($percentage -le 20) { $color = [System.Drawing.Color]::OrangeRed }
+        elseif ($percentage -le 50) { $color = [System.Drawing.Color]::Orange }
         
+        if ($percentage -le 10 -and $LastNotification -lt (Get-Date).AddHours(-1)) {
+            $script:LastNotification = Get-Date
+            [System.Windows.Forms.MessageBox]::Show("Please charge your headset", "Headset under 11%")
         }
 
         Update-TrayIcon "$percentage" $color
     } else {
-        $NotifyIcon.Text = "No Audio Battery Data"
+        $NotifyIcon.Text = "No Audio Battery Data - $(Get-Date -Format "HH:mm:ss")"
         Update-TrayIcon "--" ([System.Drawing.Color]::LightGray)
     }
 }
