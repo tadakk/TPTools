@@ -1,4 +1,4 @@
-﻿# Generated using Google Gemini 3.5 flash with some minor corrections
+# Generated using Google Gemini 3.5 flash with some minor corrections
 # ==============================================================================
 # Dynamic Bluetooth Headset Battery Monitor Tray Icon for Windows 11
 # ==============================================================================
@@ -74,7 +74,7 @@ function Refresh-BatteryStatus {
     # Update the Tray Icon
     if ($null -ne $foundBatteryData) {
         $percentage = [int]$foundBatteryData
-        $NotifyIcon.Text = "${matchedDeviceName}: $percentage%"
+        $NotifyIcon.Text = "${matchedDeviceName}: $percentage% -$(Get-Date -Format "HH:mm:ss")"
         
         # Color coding
         $color = [System.Drawing.Color]::White
