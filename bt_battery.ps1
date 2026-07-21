@@ -40,7 +40,7 @@ $liveContainerIdsOld=$global:liveContainerIds
 $global:presentLiveContainerId=$null
 $global:btDevOld=$null
 $activeBluetoothDrivers = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | 
-                            Where-Object { ($_.Service -eq "BthHFEnum" -or $_.Service -eq "BthLEEnum") -and $_.Description -eq "Microsoft Bluetooth Hands-Free Profile AudioGateway role" }
+                            Where-Object { ($_.Service -eq "BthHFEnum" -or $_.Service -eq "BthLEEnum") -and ($_.Description -eq "Microsoft Bluetooth Hands-Free Profile AudioGateway role" -or $_.Description -eq "Bluetooth LE Device") }
 
 
 # 4. Helper function to dynamically draw a percentage text icon
