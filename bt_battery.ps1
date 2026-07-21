@@ -4,7 +4,7 @@
 # ==============================================================================
 
 # 1. Configuration
-$UpdateIntervalSeconds = 30 # Frequency of checking battery status
+$UpdateIntervalSeconds = 120 # Frequency of checking battery status
 $LastNotification=(Get-Date).AddHours(-1)
 
 # 2. Load necessary assemblies for UI and Drawing
