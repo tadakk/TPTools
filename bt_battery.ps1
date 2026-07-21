@@ -4,7 +4,7 @@
 # ==============================================================================
 
 # 1. Configuration
-$UpdateIntervalSeconds = 300 # Frequency of checking battery status
+$UpdateIntervalSeconds = 30 # Frequency of checking battery status
 $LastNotification=(Get-Date).AddHours(-1)
 
 # 2. Load necessary assemblies for UI and Drawing
@@ -19,6 +19,29 @@ $NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $NotifyIcon.Visible = $true
 $theme = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
 If ($theme.SystemUsesLightTheme -eq 1) {$defaultColor="BLACK"} else {$defaultColor="WHITE"}
+$previousFound=$false
+$containerKey = "DEVPKEY_Device_ContainerId"
+
+# 1. Gather Container IDs of all CURRENTLY CONNECTED Audio Endpoints
+# When a headset powers off, Windows removes these endpoints from -PresentOnly instantly.
+$liveAudioEndpoints = @(Get-PnpDevice -Class "AudioEndpoint" -PresentOnly -ErrorAction SilentlyContinue | 
+                        Where-Object { $_.Status -eq "OK" })
+                          
+$global:liveContainerIds = @()
+foreach ($ep in $liveAudioEndpoints) {
+    $cId = (Get-PnpDeviceProperty -InstanceId $ep.InstanceId -KeyName $containerKey -ErrorAction SilentlyContinue).Data
+    if ($cId) { 
+        Write-Host "Initially found audio device $($ep.Friendlyname)"
+        $global:liveContainerIds += [string]$cId
+    }
+}
+$global:liveAudioEndpointsOld=$liveAudioEndpoints
+$liveContainerIdsOld=$global:liveContainerIds
+$global:presentLiveContainerId=$null
+$global:btDevOld=$null
+$activeBluetoothDrivers = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | 
+                            Where-Object { ($_.Service -eq "BthHFEnum" -or $_.Service -eq "BthLEEnum") -and $_.Description -eq "Microsoft Bluetooth Hands-Free Profile AudioGateway role" }
+
 
 # 4. Helper function to dynamically draw a percentage text icon
 function Update-TrayIcon ([string]$text, [System.Drawing.Color]$textColor) {
@@ -64,22 +87,25 @@ function Refresh-BatteryStatus {
 
     # 1. Gather Container IDs of all CURRENTLY CONNECTED Audio Endpoints
     # When a headset powers off, Windows removes these endpoints from -PresentOnly instantly.
-    $liveAudioEndpoints = Get-PnpDevice -Class "AudioEndpoint" -PresentOnly -ErrorAction SilentlyContinue | 
-                          Where-Object { $_.Status -eq "OK" }
+    $liveAudioEndpoints = @(Get-PnpDevice -Class "AudioEndpoint" -PresentOnly -ErrorAction SilentlyContinue | 
+                          Where-Object { $_.Status -eq "OK" })
                           
-    $liveContainerIds = @()
-    foreach ($ep in $liveAudioEndpoints) {
-        $cId = (Get-PnpDeviceProperty -InstanceId $ep.InstanceId -KeyName $containerKey -ErrorAction SilentlyContinue).Data
-        if ($cId) { 
-            Write-Host "Found audio device $($ep.Friendlyname)"
-            $liveContainerIds += [string]$cId
+    #if($global:presentLiveContainerId) {$global:liveContainerIds = @($liveContainerIdsOld | ? {$_ -ne $global:presentLiveContainerId})}
+    #$liveContainerIds=$liveContainerIdsOld
+    If ((Compare-Object -ReferenceObject $liveAudioEndpoints -DifferenceObject $global:liveAudioEndpointsOld)) {
+        $global:liveContainerIds=@()
+        foreach ($ep in ($liveAudioEndpoints | ? {$global:liveAudioEndpointsOld -notcontains $liveAudioEndpoints })) {
+            $cId = (Get-PnpDeviceProperty -InstanceId $ep.InstanceId -KeyName $containerKey -ErrorAction SilentlyContinue).Data
+            if ($cId) { 
+                Write-Host "Found audio device $($ep.Friendlyname)"
+                $global:liveContainerIds += [string]$cId
+            }
         }
     }
+    $liveContainerIdsOld = $global:liveContainerIds 
+    $global:liveAudioEndpointsOld = $liveAudioEndpoints 
 
     # 2. Get active Bluetooth Hands-Free drivers and verify it's an audio gateway
-    $activeBluetoothDrivers = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | 
-                              Where-Object { ($_.Service -eq "BthHFEnum" -or $_.Service -eq "BthLEEnum") -and $_.Description -eq "Microsoft Bluetooth Hands-Free Profile AudioGateway role" }
-
     if ($null -eq $activeBluetoothDrivers -or $activeBluetoothDrivers.Count -eq 0 -or $liveContainerIds.Count -eq 0) {
         $NotifyIcon.Text = "No Bluetooth Audio Connected"
         Update-TrayIcon "X" ([System.Drawing.Color]::Red)
@@ -90,23 +116,52 @@ function Refresh-BatteryStatus {
     $isAudioDeviceKey = "DEVPKEY_Device_DeviceDesc"
     $foundBatteryData = $null
     $matchedDeviceName = ""
-
-    foreach ($btDev in $activeBluetoothDrivers) {
-        try {
-            Write-Host "Found bluetooth device $($btDev.FriendlyName)"
-            # Check if this Bluetooth driver's Container ID exists in the LIVE audio endpoint list
-            $devContainerId = [string](Get-PnpDeviceProperty -InstanceId $btDev.InstanceId -KeyName $containerKey -ErrorAction SilentlyContinue).Data
-            if ($liveContainerIds -notcontains $devContainerId) {
-                continue # Stale node from a powered-off headset—skip it!
-            }
-            $checkData = (Get-PnpDeviceProperty -InstanceId $btDev.InstanceId -KeyName $batteryKey -ErrorAction SilentlyContinue).Data
+    
+    if ($global:btDevOld) {
+        Write-Host "Found previous bluetooth device $($btDevOld.FriendlyName)"
+        # Check if this Bluetooth driver's Container ID exists in the LIVE audio endpoint list
+        $devContainerId = [string](Get-PnpDeviceProperty -InstanceId $global:btDevOld.InstanceId -KeyName $containerKey -ErrorAction SilentlyContinue).Data
+        if ($global:liveContainerIds -contains $devContainerId) {
+            $checkData = (Get-PnpDeviceProperty -InstanceId $global:btDevOld.InstanceId -KeyName $batteryKey -ErrorAction SilentlyContinue).Data
             if ($null -ne $checkData -and $checkData -gt 0 -and $checkData -le 100) {
-                Write-Host "Found current device $($btDev.FriendlyName) with Battery Level $checkData%" -ForegroundColor Cyan
+                Write-Host "Found previous current device $($global:btDevOld.FriendlyName) with Battery Level $checkData%" -ForegroundColor Cyan
                 $foundBatteryData = $checkData
-                $matchedDeviceName = $btDev.FriendlyName -replace "\s+Hands-Free\s+AG$", ""
-                break
+                $matchedDeviceName = $global:btDevOld.FriendlyName -replace "\s+Hands-Free\s+AG$", ""
+                $previousFound=$true
+                $global:presentLiveContainerId=$devContainerId
+            } else {
+                Write-Host "Previous bluetooth device disconnected in between data gathering"
+                $previousFound=$false
+                $global:presentLiveContainerId=$null
+                $global:btDevOld=$null
             }
-        } catch {}
+        } else {
+            Write-Host "Previous bluetooth device disconnected"
+            $previousFound=$false
+            $global:presentLiveContainerId=$null
+            $global:btDevOld=$null
+        }
+    }
+    if ($previousFound -eq $false) {
+        foreach ($btDev in $activeBluetoothDrivers) {
+            try {
+                Write-Host "Found bluetooth device $($btDev.FriendlyName)"
+                # Check if this Bluetooth driver's Container ID exists in the LIVE audio endpoint list
+                $devContainerId = [string](Get-PnpDeviceProperty -InstanceId $btDev.InstanceId -KeyName $containerKey -ErrorAction SilentlyContinue).Data
+                if ($global:liveContainerIds -notcontains $devContainerId) {
+                    continue # Stale node from a powered-off headset—skip it!
+                }
+                $checkData = (Get-PnpDeviceProperty -InstanceId $btDev.InstanceId -KeyName $batteryKey -ErrorAction SilentlyContinue).Data
+                if ($null -ne $checkData -and $checkData -gt 0 -and $checkData -le 100) {
+                    Write-Host "Found current device $($btDev.FriendlyName) with Battery Level $checkData%" -ForegroundColor Cyan
+                    $foundBatteryData = $checkData
+                    $matchedDeviceName = $btDev.FriendlyName -replace "\s+Hands-Free\s+AG$", ""
+                    $global:btDevOld=$btDev
+                    $global:presentLiveContainerId=$devContainerId
+                    break
+                }
+            } catch {}
+        }
     }
 
     # Update the Tray Icon
