@@ -39,8 +39,9 @@ $global:liveAudioEndpointsOld=$liveAudioEndpoints
 $liveContainerIdsOld=$global:liveContainerIds
 $global:presentLiveContainerId=$null
 $global:btDevOld=$null
-$activeBluetoothDrivers = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | 
+$global:activeBluetoothDrivers = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | 
                             Where-Object { ($_.Service -eq "BthHFEnum" -or $_.Service -eq "BthLEEnum") -and ($_.Description -eq "Microsoft Bluetooth Hands-Free Profile AudioGateway role" -or $_.Description -eq "Bluetooth LE Device") }
+$global:devContainerIds=[PSCustomObject] @{FriendlyName="Not this one"}
 
 
 # 4. Helper function to dynamically draw a percentage text icon
@@ -103,8 +104,23 @@ function Refresh-BatteryStatus {
         }
     }
     $liveContainerIdsOld = $global:liveContainerIds 
-    $global:liveAudioEndpointsOld = $liveAudioEndpoints 
-
+    $global:liveAudioEndpointsOld = $liveAudioEndpoints
+    $global:activeBluetoothDrivers = Get-PnpDevice -Status "OK" -ErrorAction SilentlyContinue | 
+                            Where-Object { ($_.Service -eq "BthHFEnum" -or $_.Service -eq "BthLEEnum") -and ($_.Description -eq "Microsoft Bluetooth Hands-Free Profile AudioGateway role" -or $_.Description -eq "Bluetooth LE Device") }
+    if ((Compare-Object -ReferenceObject $global:activeBluetoothDrivers.FriendlyName -DifferenceObject $global:devContainerIds.FriendlyName -ErrorAction SilentlyContinue)) {
+        $global:devContainerIds=@()
+        foreach ($btDev in $global:activeBluetoothDrivers) {
+            try {
+                Write-Host "Found bluetooth device $($btDev.FriendlyName)"
+                # Check if this Bluetooth driver's Container ID exists
+                $global:devContainerIds += [PSCustomObject] @{
+                    InstanceId=$btDev.InstanceId
+                    FriendlyName=$btDev.FriendlyName
+                    ContainerId=[string](Get-PnpDeviceProperty -InstanceId $btDev.InstanceId -KeyName $containerKey).Data
+                }
+            } catch {}
+        }
+    }
     # 2. Get active Bluetooth Hands-Free drivers and verify it's an audio gateway
     if ($null -eq $activeBluetoothDrivers -or $activeBluetoothDrivers.Count -eq 0 -or $liveContainerIds.Count -eq 0) {
         $NotifyIcon.Text = "No Bluetooth Audio Connected"
@@ -143,11 +159,11 @@ function Refresh-BatteryStatus {
         }
     }
     if ($previousFound -eq $false) {
-        foreach ($btDev in $activeBluetoothDrivers) {
+        Write-Host "Checking for connected headset"
+        foreach ($btDev in $global:devContainerIds) {
             try {
-                Write-Host "Found bluetooth device $($btDev.FriendlyName)"
                 # Check if this Bluetooth driver's Container ID exists in the LIVE audio endpoint list
-                $devContainerId = [string](Get-PnpDeviceProperty -InstanceId $btDev.InstanceId -KeyName $containerKey -ErrorAction SilentlyContinue).Data
+                $devContainerId = $btDev.ContainerId
                 if ($global:liveContainerIds -notcontains $devContainerId) {
                     continue # Stale node from a powered-off headset—skip it!
                 }
