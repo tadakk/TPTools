@@ -203,7 +203,7 @@ function Refresh-BatteryStatus {
         $NotifyIcon.Text = "${matchedDeviceName}: $percentage% - $(Get-Date -Format "HH:mm:ss")"
         
         # Color coding
-        $color = [System.Drawing.Color]::$defaultColor
+        $color = $defaultColor
         if ($percentage -le 20) { $color = $criticalColor }
         elseif ($percentage -le 50) { $color = $warningColor }
         
