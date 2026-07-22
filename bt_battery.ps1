@@ -1,7 +1,9 @@
-﻿# Generated using Google Gemini 3.5 flash with some minor corrections
+﻿# Generated using Google Gemini 3.5 flash with moderate coding
 # ==============================================================================
 # Dynamic Bluetooth Headset Battery Monitor Tray Icon for Windows 11
 # ==============================================================================
+
+v0.45
 
 # 1. Configuration
 $UpdateIntervalSeconds = 120 # Frequency of checking battery status
