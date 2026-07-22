@@ -3,7 +3,7 @@
 # Dynamic Bluetooth Headset Battery Monitor Tray Icon for Windows 11
 # ==============================================================================
 
-$ver="0.45"
+$ver="0.5"
 
 # 1. Configuration
 $UpdateIntervalSeconds = 120 # Frequency of checking battery status
@@ -195,6 +195,7 @@ function Refresh-BatteryStatus {
         
         if ($percentage -le 10 -and $LastNotification -lt (Get-Date).AddHours(-1)) {
             $script:LastNotification = Get-Date
+            [Console]::Beep(100, 2000)
             [System.Windows.Forms.MessageBox]::Show("Please charge your headset", "Headset under 11%")
         }
 
