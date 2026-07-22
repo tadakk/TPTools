@@ -3,7 +3,7 @@
 # Dynamic Bluetooth Headset Battery Monitor Tray Icon for Windows 11
 # ==============================================================================
 
-$ver="0.51"
+$ver="0.55"
 
 # 1. Configuration
 $UpdateIntervalSeconds = 120 # Frequency of checking battery status
@@ -195,9 +195,24 @@ function Refresh-BatteryStatus {
         
         if ($percentage -le 10 -and $LastNotification -lt (Get-Date).AddHours(-1)) {
             $script:LastNotification = Get-Date
-            1..3 | ForEach-Object {
-               [Console]::Beep(100, 750)
-               Start-Sleep -Milliseconds 250
+            # Initialize SAPI via COM (works in PowerShell 5.1 and 7+)
+            try {
+                $speech = New-Object -ComObject SAPI.SpVoice
+                
+                # Target Microsoft Zira (Female US Voice)
+                $ziraVoice = $speech.GetVoices() | Where-Object { $_.GetDescription() -like "*Zira*" }
+                if ($ziraVoice) { $speech.Voice = $ziraVoice }
+                
+                # Slow down speech pace (-10 to 10 scale; -3 is measured and deliberate)
+                $speech.Rate = -3
+                
+                # Speak alert synchronously
+                [void]$speech.Speak("Charge headset")
+            } catch {
+                1..3 | ForEach-Object {
+                   [Console]::Beep(100, 750)
+                   Start-Sleep -Milliseconds 250
+                }
             }
             [System.Windows.Forms.MessageBox]::Show("Please charge your headset", "Headset under 11%")
         }
