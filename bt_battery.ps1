@@ -3,7 +3,7 @@
 # Dynamic Bluetooth Headset Battery Monitor Tray Icon for Windows 11
 # ==============================================================================
 
-$ver="0.56"
+$ver="0.57"
 
 # 1. Configuration
 $UpdateIntervalSeconds = 120 # Frequency of checking battery status
@@ -24,7 +24,18 @@ $Context = New-Object System.Windows.Forms.ApplicationContext
 $NotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $NotifyIcon.Visible = $true
 $theme = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-If ($theme.SystemUsesLightTheme -eq 1) {$defaultColor="BLACK"} else {$defaultColor="WHITE"}
+if ($theme.SystemUsesLightTheme -eq 1) {
+    # Light Theme Palette
+    $defaultColor  = [System.Drawing.Color]::Black
+    $warningColor  = [System.Drawing.Color]::Orange      # Strong against light
+    $criticalColor = [System.Drawing.Color]::OrangeRed   # Dark enough for contrast
+} else {
+    # Dark Theme Palette (Optimized for Black Taskbar)
+    $defaultColor  = [System.Drawing.Color]::White
+    $warningColor  = [System.Drawing.Color]::Gold        # Slightly brighter amber
+    $criticalColor = [System.Drawing.Color]::Tomato      # High-visibility coral-red
+}
+
 $previousFound=$false
 $containerKey = "DEVPKEY_Device_ContainerId"
 
@@ -193,8 +204,8 @@ function Refresh-BatteryStatus {
         
         # Color coding
         $color = [System.Drawing.Color]::$defaultColor
-        if ($percentage -le 20) { $color = [System.Drawing.Color]::OrangeRed }
-        elseif ($percentage -le 50) { $color = [System.Drawing.Color]::Orange }
+        if ($percentage -le 20) { $color = $criticalColor }
+        elseif ($percentage -le 50) { $color = $warningColor }
         
         if ($percentage -le 10 -and $LastNotification -lt (Get-Date).AddMinutes(-$NotificationIntervalInMinutes)) {
             $script:LastNotification = Get-Date
