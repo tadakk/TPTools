@@ -3,11 +3,14 @@
 # Dynamic Bluetooth Headset Battery Monitor Tray Icon for Windows 11
 # ==============================================================================
 
-$ver="0.55"
+$ver="0.56"
 
 # 1. Configuration
 $UpdateIntervalSeconds = 120 # Frequency of checking battery status
-$LastNotification=(Get-Date).AddHours(-1)
+$NotificationIntervalInMinutes=60
+
+#Main Script
+$LastNotification=(Get-Date).AddMinutes(-$NotificationIntervalInMinutes)
 Write-Host "Bluetooth Headset Percentage Tray Icon version $ver"
 
 # 2. Load necessary assemblies for UI and Drawing
@@ -193,7 +196,7 @@ function Refresh-BatteryStatus {
         if ($percentage -le 20) { $color = [System.Drawing.Color]::OrangeRed }
         elseif ($percentage -le 50) { $color = [System.Drawing.Color]::Orange }
         
-        if ($percentage -le 10 -and $LastNotification -lt (Get-Date).AddHours(-1)) {
+        if ($percentage -le 10 -and $LastNotification -lt (Get-Date).AddMinutes(-$NotificationIntervalInMinutes)) {
             $script:LastNotification = Get-Date
             # Initialize SAPI via COM (works in PowerShell 5.1 and 7+)
             try {
